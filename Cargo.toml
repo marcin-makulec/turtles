@@ -1,0 +1,11 @@
+[package]
+name = "turtles"
+version = "0.1.0"
+edition = "2023"
+authors = ["Marcin Makulec <m.makulec321@gmail.com"]
+license = "MIT"
+repository = "https://github.com/marcin-makulec/turtles"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
