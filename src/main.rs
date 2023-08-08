@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn error::Error>> {
     match get_critical_number(steps_in_tunnel, 100) {
         Some(x) => println!(
             "The tunnel will crumble at number {} on line {}",
-            x.step, x.index
+            x.step, x.index + 1
         ),
         None => println!("The tunnel will not crumble"),
     }

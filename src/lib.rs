@@ -66,10 +66,9 @@ pub fn get_critical_number<T: Ord + Add<Output = T> + Copy + Debug + Mul<u128, O
 
     for (index, step) in steps_in_tunnel.enumerate() {
         if !sorted_tunnel.is_tunnel_safe(step) {
-            // outside of programming, we usually think of file lines as indexed from 1
             // we need to add tunnel_len, as the for loop starts from this offset
             return Some(IndexedStep {
-                index: index + tunnel_len + 1,
+                index: index + tunnel_len,
                 step,
             });
         }
@@ -86,17 +85,6 @@ mod tunnel_utils {
     use std::fmt::Debug;
     use std::ops::{Add, Mul};
 
-    /// Holds information about preceding fragment of the tunnel.
-    /// 
-    /// BTreeMap is used because it's sorted and because of it's fast lookup times.
-    /// It cannot store duplicate keys, so the underlying queue represents how many keys are present
-    /// and the usize values represent their order in the preceding tunnel fragment.
-    ///
-    /// This is efficient because checking sums of elements smaller than our target consist the majority
-    /// of operations conducted later and because we will only remove elements from the start of the queue
-    /// and append at its end.
-    type TunnelMap<T> = BTreeMap<T, VecDeque<usize>>;
-
     /// This trait allows us to handle inserting duplicate keys to the BTreeMap.
     trait AddDuplicate<T>
     where
@@ -105,35 +93,45 @@ mod tunnel_utils {
         fn add_duplicate(&mut self, step: T, age: usize);
     }
 
-    impl<T> AddDuplicate<T> for TunnelMap<T>
+    /// Holds information about preceding fragment of the tunnel.
+    ///
+    /// `BTreeMap` is used because it's sorted and because of its fast lookup times.
+    /// It cannot store duplicate keys, so the underlying queue represents how many keys are present.
+    /// `usize` values represent their order in the preceding tunnel fragment.
+    ///
+    /// This is efficient because checking sums of elements which are smaller than our target is the majority
+    /// of operations conducted in the process. Also, we will only remove elements from the start of the queue
+    /// and append at its end, so `VecDeque` is also appropriate.
+    pub struct SortedTunnel<T>
+    where
+        T: Ord + Add<Output = T> + Copy,
+    {
+        tunnel_map: BTreeMap<T, VecDeque<usize>>,
+        tunnel_length: usize,
+    }
+
+    impl<T> AddDuplicate<T> for SortedTunnel<T>
     where
         T: Ord + Add<Output = T> + Copy,
     {
         fn add_duplicate(&mut self, step: T, age: usize) {
-            self.entry(step)
+            self.tunnel_map
+                .entry(step)
                 .and_modify(|ages| ages.push_back(age))
                 .or_insert(VecDeque::from([age]));
         }
     }
 
-    pub struct SortedTunnel<T>
-    where
-        T: Ord + Add<Output = T> + Copy,
-    {
-        tunnel_map: TunnelMap<T>,
-        tunnel_length: usize,
-    }
-
     impl<T: Ord + Add<Output = T> + Copy + Debug + Mul<u128, Output = T>> SortedTunnel<T> {
         pub fn new(tunnel: Vec<T>) -> SortedTunnel<T> {
-            let mut tunnel_map: TunnelMap<T> = BTreeMap::new();
-            for (age, step) in tunnel.iter().enumerate() {
-                tunnel_map.add_duplicate(*step, age);
-            }
-            SortedTunnel {
-                tunnel_map,
+            let mut sorted_tunnel = SortedTunnel {
+                tunnel_map: BTreeMap::new(),
                 tunnel_length: tunnel.len() - 1,
+            };
+            for (age, step) in tunnel.iter().enumerate() {
+                sorted_tunnel.add_duplicate(*step, age);
             }
+            sorted_tunnel
         }
 
         /// Removes the oldest step in preceding fragment.
@@ -163,7 +161,7 @@ mod tunnel_utils {
         /// Replaces the oldest step from preceding tunnel fragment with a new step.
         pub fn shift_right(&mut self, new_step: T) {
             self.remove_oldest_step();
-            self.tunnel_map.add_duplicate(new_step, self.tunnel_length);
+            self.add_duplicate(new_step, self.tunnel_length);
         }
 
         /// Checks if the tunnel won't collapse after the next step.
