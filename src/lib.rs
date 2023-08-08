@@ -1,31 +1,75 @@
-use std::ops::Add;
+//! # turtles
+//! This library is a set of utilities created for Number Associative Mining and Trading Inc
+//! for finding the point where the tunnel may collapse on their turtles 🐢
+
+use std::{
+    fmt::Debug,
+    ops::{Add, Mul},
+};
 use tunnel_utils::SortedTunnel;
 
+/// Holds information on what value would (`step`) cause the tunnel to collapse
+/// and at which step/on which line (`index`) it would happen
+#[derive(Debug, PartialEq)]
 pub struct IndexedStep<T>
 where
     T: Ord + Add<Output = T>,
 {
-    pub index: usize,
     pub step: T,
+    pub index: usize,
 }
 
-pub fn get_critical_number<T: Ord + Add<Output = T> + Copy>(
-    steps: &mut impl Iterator<Item = T>,
+/// Consumes `steps` until it finds a step at which tunnel would collapse.
+/// Tunnel collapses if the next step cannot be represented as a sum of 2 from `tunnel_len` preceding elements.
+/// Returns `None` if the tunnel is safe (including the case when `tunnel_len` is bigger or equal to `steps` length).
+///
+/// # Examples
+///
+/// ```
+/// use turtles::get_critical_number;
+/// use turtles::IndexedStep;
+///
+/// let steps = vec![5, 4, 7, 9, 14].into_iter();
+/// let tunnel_len = 3;
+/// let answer = get_critical_number(steps, tunnel_len);
+///
+/// assert_eq!(answer, Some(IndexedStep {step: 14, index: 4}));
+///
+///
+/// let steps = vec![5, 4, 9].into_iter();
+/// let tunnel_len = 2;
+/// let answer = get_critical_number(steps, tunnel_len);
+///
+/// assert_eq!(answer, None);
+///
+///
+/// let steps = vec![5, 4, 18].into_iter();
+/// let tunnel_len = 3;
+/// let answer = get_critical_number(steps, tunnel_len);
+///
+/// assert_eq!(answer, None);
+/// ```
+pub fn get_critical_number<T: Ord + Add<Output = T> + Copy + Debug + Mul<u128, Output = T>>(
+    mut steps_in_tunnel: impl Iterator<Item = T>,
     tunnel_len: usize,
 ) -> Option<IndexedStep<T>> {
-    let tunnel = steps.by_ref().take(tunnel_len).collect();
-    let mut steps = steps.peekable();
+    // first tunnel_len steps are removed from the iterator
+    let tunnel = steps_in_tunnel.by_ref().take(tunnel_len).collect();
+    let mut steps_in_tunnel = steps_in_tunnel.peekable();
 
-    if steps.peek() == None {
+    // if the iterator is empty, the tunnel is safe
+    if steps_in_tunnel.peek() == None {
         return None;
     }
 
     let mut sorted_tunnel = SortedTunnel::new(tunnel);
 
-    for (index, step) in steps.enumerate() {
+    for (index, step) in steps_in_tunnel.enumerate() {
         if !sorted_tunnel.is_tunnel_safe(step) {
+            // outside of programming, we usually think of file lines as indexed from 1
+            // we need to add tunnel_len, as the for loop starts from this offset
             return Some(IndexedStep {
-                index: index + tunnel_len,
+                index: index + tunnel_len + 1,
                 step,
             });
         }
@@ -35,20 +79,31 @@ pub fn get_critical_number<T: Ord + Add<Output = T> + Copy>(
     None
 }
 
-// TODO docs
+/// Low level utilities for examining tunnels for turtles
 mod tunnel_utils {
     use std::cmp::Ordering;
     use std::collections::{BTreeMap, VecDeque};
-    use std::ops::Add;
+    use std::fmt::Debug;
+    use std::ops::{Add, Mul};
 
+    /// Holds information about preceding fragment of the tunnel.
+    /// 
+    /// BTreeMap is used because it's sorted and because of it's fast lookup times.
+    /// It cannot store duplicate keys, so the underlying queue represents how many keys are present
+    /// and the usize values represent their order in the preceding tunnel fragment.
+    ///
+    /// This is efficient because checking sums of elements smaller than our target consist the majority
+    /// of operations conducted later and because we will only remove elements from the start of the queue
+    /// and append at its end.
+    type TunnelMap<T> = BTreeMap<T, VecDeque<usize>>;
+
+    /// This trait allows us to handle inserting duplicate keys to the BTreeMap.
     trait AddDuplicate<T>
     where
         T: Ord + Add<Output = T> + Copy,
     {
         fn add_duplicate(&mut self, step: T, age: usize);
     }
-
-    type TunnelMap<T> = BTreeMap<T, VecDeque<usize>>;
 
     impl<T> AddDuplicate<T> for TunnelMap<T>
     where
@@ -69,7 +124,7 @@ mod tunnel_utils {
         tunnel_length: usize,
     }
 
-    impl<T: Ord + Add<Output = T> + Copy> SortedTunnel<T> {
+    impl<T: Ord + Add<Output = T> + Copy + Debug + Mul<u128, Output = T>> SortedTunnel<T> {
         pub fn new(tunnel: Vec<T>) -> SortedTunnel<T> {
             let mut tunnel_map: TunnelMap<T> = BTreeMap::new();
             for (age, step) in tunnel.iter().enumerate() {
@@ -81,6 +136,7 @@ mod tunnel_utils {
             }
         }
 
+        /// Removes the oldest step in preceding fragment.
         fn remove_oldest_step(&mut self) {
             let mut target_step: Option<T> = None;
             for (step, ages) in self.tunnel_map.iter() {
@@ -101,22 +157,32 @@ mod tunnel_utils {
                     .for_each(|ages| ages.iter_mut().for_each(|age| *age -= 1));
                 return;
             }
-            panic!("There was no oldest key in SortedTunnel before removal");
+            panic!("There was no oldest step in SortedTunnel before removal");
         }
 
-        pub fn shift_right(&mut self, new_key: T) {
+        /// Replaces the oldest step from preceding tunnel fragment with a new step.
+        pub fn shift_right(&mut self, new_step: T) {
             self.remove_oldest_step();
-            self.tunnel_map.add_duplicate(new_key, self.tunnel_length);
+            self.tunnel_map.add_duplicate(new_step, self.tunnel_length);
         }
 
-        pub fn is_tunnel_safe(&self, step: T) -> bool {
-            'outer: for (i, (candidate_a, _)) in self.tunnel_map.iter().enumerate() {
-                if candidate_a >= &step {
+        /// Checks if the tunnel won't collapse after the next step.
+        pub fn is_tunnel_safe(&self, new_step: T) -> bool {
+            'outer: for (i, (candidate_a, ages_a)) in self.tunnel_map.iter().enumerate() {
+                if candidate_a >= &new_step {
                     return false;
                 }
 
-                for (candidate_b, _) in self.tunnel_map.iter().skip(i) {
-                    match (*candidate_a + *candidate_b).cmp(&step) {
+                if ages_a.len() > 1 && *candidate_a * 2 == new_step {
+                    return true;
+                }
+
+                if i == 2 {
+                    println!();
+                    println!("{:?}", candidate_a);
+                }
+                for (candidate_b, _) in self.tunnel_map.iter().skip(i + 1) {
+                    match (*candidate_a + *candidate_b).cmp(&new_step) {
                         Ordering::Equal => return true,
                         Ordering::Greater => continue 'outer,
                         _ => continue,

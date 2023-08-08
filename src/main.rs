@@ -10,11 +10,11 @@ fn main() -> Result<(), Box<dyn error::Error>> {
     let filename = args.get(1).ok_or("Usage: turtles <filename>")?;
     let input_text = fs::read_to_string(filename)?;
 
-    let mut steps_in_tunnel = input_text
+    let steps_in_tunnel = input_text
         .lines()
         .filter_map(|line| line.parse::<u128>().ok());
 
-    match get_critical_number(&mut steps_in_tunnel, 100) {
+    match get_critical_number(steps_in_tunnel, 100) {
         Some(x) => println!(
             "The tunnel will crumble at number {} on line {}",
             x.step, x.index
