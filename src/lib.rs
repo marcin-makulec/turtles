@@ -175,10 +175,6 @@ mod tunnel_utils {
                     return true;
                 }
 
-                if i == 2 {
-                    println!();
-                    println!("{:?}", candidate_a);
-                }
                 for (candidate_b, _) in self.tunnel_map.iter().skip(i + 1) {
                     match (*candidate_a + *candidate_b).cmp(&new_step) {
                         Ordering::Equal => return true,
